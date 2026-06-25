@@ -11,6 +11,7 @@ from app.config import get_settings
 from app.db.models import Consent, Institution, Transaction, TransactionSource, User
 from app.statements.hsbc_credit import parse_hsbc_credit_statement
 from app.telegram.client import TelegramClient
+from app.telegram.security import is_user_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,10 @@ async def handle_update(db: Session, update: dict) -> None:
     from_user = message.get("from", {})
     user_id = from_user.get("id")
     if not user_id:
+        return
+
+    if not is_user_allowed(user_id):
+        await client.send_message(chat_id, "This bot is private. Access denied.")
         return
 
     user = _get_or_create_user(db, user_id)
