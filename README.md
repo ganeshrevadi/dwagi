@@ -1,4 +1,4 @@
-# Puppy — Telegram Spending Bot
+# DWAGI — Telegram Spending Bot
 
 Personal spending analysis bot for Telegram. Fetches real bank transactions from **HSBC, BOB, Canara, and IDFC** via India's Account Aggregator (Setu), imports **HSBC credit card** bills from PDF, and answers spending questions with Gemini.
 
