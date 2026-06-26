@@ -10,6 +10,15 @@ from app.chat.agent import chat_with_agent
 from app.config import get_settings
 from app.db.models import Consent, Institution, Transaction, TransactionSource, User
 from app.statements.hsbc_credit import parse_hsbc_credit_statement
+from app.jobs.telegram_commands import (
+    handle_apply_command,
+    handle_jobs_command,
+    handle_pipeline_command,
+    handle_profile_command,
+    handle_referrals_command,
+    handle_resume_command,
+    handle_scan_command,
+)
 from app.telegram.client import TelegramClient
 from app.telegram.security import is_user_allowed
 
@@ -25,6 +34,17 @@ Commands:
   Example: /connect 9876543210
 /upload — How to import HSBC credit card PDF
 /sync — Refresh bank transactions
+
+Job Tracker:
+/jobs — New matching jobs today
+/jobs:all — All tracked jobs
+/apply <id> — Mark a job as applied
+/referrals — Jobs needing referrals
+/pipeline — Application summary
+/scan — Run job search now
+/profile — Show your search profile
+/resume — Show your parsed resume data
+Send a PDF named "resume" → parse & update your profile
 
 Ask spending questions in plain English:
 • How much did I spend on food last month?
@@ -107,6 +127,22 @@ async def _handle_command(db: Session, client: TelegramClient, user: User, chat_
         )
     elif command == "/sync":
         await _handle_sync(db, client, user, chat_id)
+    elif command == "/jobs":
+        await handle_jobs_command(db, client, user, chat_id, arg or "")
+    elif command == "/jobs:all":
+        await handle_jobs_command(db, client, user, chat_id, "all")
+    elif command == "/apply":
+        await handle_apply_command(db, client, user, chat_id, arg)
+    elif command == "/referrals":
+        await handle_referrals_command(db, client, user, chat_id)
+    elif command == "/pipeline":
+        await handle_pipeline_command(db, client, user, chat_id)
+    elif command == "/scan":
+        await handle_scan_command(db, client, user, chat_id)
+    elif command == "/profile":
+        await handle_profile_command(db, client, user, chat_id)
+    elif command == "/resume":
+        await handle_resume_command(db, client, user, chat_id)
     else:
         await client.send_message(chat_id, "Unknown command. Try /help")
 
@@ -187,59 +223,66 @@ async def _handle_sync(db: Session, client: TelegramClient, user: User, chat_id:
 
 async def _handle_document(db: Session, client: TelegramClient, user: User, chat_id: int, document: dict) -> None:
     mime = document.get("mime_type", "")
-    file_name = document.get("file_name", "")
-    if mime != "application/pdf" and not file_name.lower().endswith(".pdf"):
-        await client.send_message(chat_id, "Please send a PDF statement (not images).")
+    file_name = document.get("file_name", "").lower()
+    if mime != "application/pdf" and not file_name.endswith(".pdf"):
+        await client.send_message(chat_id, "Please send a PDF document.")
         return
 
     try:
-        await client.send_message(chat_id, "Parsing PDF statement...")
         pdf_bytes = await client.get_file_bytes(document["file_id"])
-        parsed = parse_hsbc_credit_statement(pdf_bytes)
-
-        if not parsed:
-            await client.send_message(
-                chat_id,
-                "Couldn't extract transactions from this PDF. "
-                "Make sure it's an HSBC credit card e-statement with a transaction table.",
-            )
-            return
-
-        inserted = 0
-        for txn in parsed:
-            external_id = f"pdf:hsbc_cc:{txn.txn_date}:{txn.description[:40]}:{txn.amount}"
-            existing = (
-                db.query(Transaction)
-                .filter(Transaction.user_id == user.id, Transaction.external_id == external_id)
-                .first()
-            )
-            if existing:
-                continue
-            db.add(
-                Transaction(
-                    user_id=user.id,
-                    source=TransactionSource.PDF_CREDIT_CARD.value,
-                    institution=Institution.HSBC_CC.value,
-                    account_masked="HSBC-CC",
-                    txn_date=txn.txn_date,
-                    amount=txn.amount,
-                    txn_type=txn.txn_type,
-                    description=txn.description,
-                    category=categorize(txn.description),
-                    external_id=external_id,
-                )
-            )
-            inserted += 1
-        db.commit()
-
-        await client.send_message(
-            chat_id,
-            f"Imported {inserted} new transactions from HSBC credit card PDF "
-            f"({len(parsed)} found, {len(parsed) - inserted} duplicates skipped).",
-        )
     except Exception as e:
-        logger.exception("PDF import failed")
-        await client.send_message(chat_id, f"Failed to parse PDF: {e}")
+        logger.exception("Failed to download PDF")
+        await client.send_message(chat_id, f"Failed to download file: {e}")
+        return
+
+    is_resume = "resume" in file_name or "cv" in file_name
+
+    if not is_resume:
+        try:
+            await client.send_message(chat_id, "Parsing PDF statement...")
+            parsed = parse_hsbc_credit_statement(pdf_bytes)
+            if parsed:
+                inserted = 0
+                for txn in parsed:
+                    external_id = f"pdf:hsbc_cc:{txn.txn_date}:{txn.description[:40]}:{txn.amount}"
+                    existing = (
+                        db.query(Transaction)
+                        .filter(Transaction.user_id == user.id, Transaction.external_id == external_id)
+                        .first()
+                    )
+                    if existing:
+                        continue
+                    db.add(
+                        Transaction(
+                            user_id=user.id,
+                            source=TransactionSource.PDF_CREDIT_CARD.value,
+                            institution=Institution.HSBC_CC.value,
+                            account_masked="HSBC-CC",
+                            txn_date=txn.txn_date,
+                            amount=txn.amount,
+                            txn_type=txn.txn_type,
+                            description=txn.description,
+                            category=categorize(txn.description),
+                            external_id=external_id,
+                        )
+                    )
+                    inserted += 1
+                db.commit()
+                await client.send_message(
+                    chat_id,
+                    f"Imported {inserted} new transactions from HSBC credit card PDF "
+                    f"({len(parsed)} found, {len(parsed) - inserted} duplicates skipped).",
+                )
+                return
+        except Exception:
+            logger.exception("HSBC parse failed, trying resume...")
+
+    from app.jobs.telegram_commands import handle_upload_resume
+    try:
+        await handle_upload_resume(db, client, user, chat_id, pdf_bytes)
+    except Exception:
+        logger.exception("Resume upload failed")
+        await client.send_message(chat_id, "Failed to parse resume PDF.")
 
 
 async def handle_setu_notification(db: Session, payload: dict) -> None:

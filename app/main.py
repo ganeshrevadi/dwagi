@@ -5,6 +5,7 @@ from fastapi import FastAPI
 
 from app.config import get_settings
 from app.db.session import init_db
+from app.jobs.router import router as jobs_router
 from app.routers import health, setu, sync, telegram
 from app.telegram.client import TelegramClient
 
@@ -34,6 +35,7 @@ app.include_router(health.router)
 app.include_router(telegram.router)
 app.include_router(setu.router)
 app.include_router(sync.router)
+app.include_router(jobs_router)
 
 
 @app.get("/")

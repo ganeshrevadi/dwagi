@@ -1,13 +1,22 @@
-# DWAGI — Telegram Spending Bot
+# DWAGI — Telegram Spending Bot + Job Tracker
 
-Personal spending analysis bot for Telegram. Fetches real bank transactions from **HSBC, BOB, Canara, and IDFC** via India's Account Aggregator (Setu), imports **HSBC credit card** bills from PDF, and answers spending questions with Gemini.
+Personal spending analysis bot for Telegram, now with an automated job tracker. Fetches real bank transactions from **HSBC, BOB, Canara, and IDFC** via India's Account Aggregator (Setu), imports **HSBC credit card** bills from PDF, answers spending questions with Gemini, and monitors job openings at companies with 500+ employees.
 
 ## Features
 
+### Spending
 - **Bank accounts** — consent-based fetch via Setu Account Aggregator (`/connect`)
 - **HSBC credit card** — upload e-statement PDF in Telegram chat
 - **Spending chat** — natural language questions powered by Gemini + structured DB queries
 - **Unified view** — all accounts in one transaction store
+
+### Job Tracker
+- **Multi-source scraping** — Google Jobs (aggregator), Greenhouse, Lever, RemoteOK, and LinkedIn
+- **Company filter** — only jobs at companies with 500+ employees (100+ companies pre-curated)
+- **Profile matching** — scores jobs against your skills, target titles, locations, and salary
+- **Referral suggestions** — flags jobs at competitive companies where a referral would help
+- **Application pipeline** — tracks discovered → applied → interviewing → offer status
+- **Twice-daily scans** — automatic morning (8 AM) and evening (6 PM) job digests via Telegram
 
 ## Quick start (local)
 
@@ -53,6 +62,13 @@ ngrok http 8000
 | `/upload` | Instructions for HSBC credit card PDF |
 | `/status` | Transaction count and consent status |
 | `/sync` | Manually refresh bank transactions |
+| `/jobs` | Today's matching jobs |
+| `/jobs:all` | All tracked jobs |
+| `/apply <id>` | Mark a job as applied |
+| `/referrals` | Jobs where a referral would help |
+| `/pipeline` | Application summary |
+| `/scan` | Run job search now |
+| `/profile` | Show your search profile |
 | Send PDF | Import HSBC credit card statement |
 | Any text | Ask spending questions |
 
@@ -65,6 +81,7 @@ ngrok http 8000
 5. Set `PUBLIC_BASE_URL` to your Render URL (e.g. `https://puppy.onrender.com`)
 6. [cron-job.org](https://cron-job.org) — ping `GET /health` every 14 min (keeps free tier awake)
 7. Optional: schedule `POST /sync` weekly for bank refresh
+8. Schedule `POST /jobs/scan` twice daily (8 AM, 6 PM) for automatic job scans
 
 ## Setu Account Aggregator setup
 
@@ -98,6 +115,17 @@ See [`.env.example`](.env.example) for the full list.
 | `SETU_CLIENT_ID` | For banks | Setu Bridge credentials |
 | `SETU_CLIENT_SECRET` | For banks | Setu Bridge credentials |
 | `SETU_PRODUCT_INSTANCE_ID` | For banks | Setu product ID |
+| `JOB_SCAN_ENABLED` | No | Enable job tracker (default: true) |
+| `COMPANY_MIN_EMPLOYEES` | No | Minimum company size to track (default: 500) |
+| `GOOGLE_JOBS_ENABLED` | No | Enable Google Jobs scraper |
+| `GREENHOUSE_ENABLED` | No | Enable Greenhouse API scraper |
+| `LEVER_ENABLED` | No | Enable Lever API scraper |
+| `REMOTEOK_ENABLED` | No | Enable RemoteOK scraper |
+| `LINKEDIN_ENABLED` | No | Enable LinkedIn scraper (may need rotation) |
+| `PROFILE_SKILLS` | No | Comma-separated skills for job matching |
+| `PROFILE_TARGET_TITLES` | No | Comma-separated target job titles |
+| `PROFILE_LOCATIONS` | No | Comma-separated preferred locations |
+| `PROFILE_MIN_SALARY` | No | Minimum salary threshold |
 
 Find your Telegram user ID: message [@userinfobot](https://t.me/userinfobot).
 
@@ -109,6 +137,12 @@ Telegram → FastAPI webhook → Postgres
          Setu AA (banks) + PDF parser (HSBC card)
                 ↓
          Gemini (tool-calling over transactions)
+                ↓
+         Job Scrapers (Google Jobs, Greenhouse, Lever, RemoteOK, LinkedIn)
+                ↓
+         Matcher (profile scoring + company size filter)
+                ↓
+         Telegram digest (morning + evening)
 ```
 
 ## Project structure
@@ -122,6 +156,20 @@ app/
 ├── banking/             # Setu AA integration
 ├── statements/          # HSBC PDF parser
 ├── chat/                # Gemini agent + query tools
+├── jobs/                # Job tracker module
+│   ├── models.py        # Job, JobApplication, Company tables
+│   ├── company_db.py    # Curated companies with employee counts
+│   ├── matcher.py       # Profile-based job scoring
+│   ├── scanner.py       # Orchestrator (run scrapers → match → store)
+│   ├── telegram_commands.py  # Telegram command handlers
+│   ├── router.py        # HTTP endpoints
+│   ├── config.py        # Job-specific settings
+│   └── scrapers/
+│       ├── google_jobs.py   # Google Jobs scraper
+│       ├── greenhouse.py    # Greenhouse API scraper
+│       ├── lever.py         # Lever API scraper
+│       ├── remoteok.py      # RemoteOK API scraper
+│       └── linkedin.py      # LinkedIn scraper
 └── routers/             # HTTP endpoints
 ```
 

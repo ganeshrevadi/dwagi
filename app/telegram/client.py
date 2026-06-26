@@ -27,10 +27,15 @@ class TelegramClient:
                 logger.error("Telegram API error on %s: %s", method, data)
             return data
 
-    async def send_message(self, chat_id: int, text: str, parse_mode: str | None = None) -> None:
+    async def send_message(
+        self, chat_id: int, text: str, parse_mode: str | None = None,
+        disable_web_page_preview: bool = False,
+    ) -> None:
         payload: dict[str, Any] = {"chat_id": chat_id, "text": text}
         if parse_mode:
             payload["parse_mode"] = parse_mode
+        if disable_web_page_preview:
+            payload["disable_web_page_preview"] = True
         await self._post("sendMessage", payload)
 
     async def send_message_chunked(self, chat_id: int, text: str, chunk_size: int = 4000) -> None:
