@@ -12,12 +12,12 @@ from app.db.models import Consent, Institution, Transaction, TransactionSource, 
 logger = logging.getLogger(__name__)
 
 FIP_TO_INSTITUTION = {
-    "hsbc": Institution.HSBC.value,
+    "hsbc": Institution.BANK_AA.value,
     "hdfc": Institution.UNKNOWN.value,
-    "baroda": Institution.BOB.value,
-    "bob": Institution.BOB.value,
-    "canara": Institution.CANARA.value,
-    "idfc": Institution.IDFC.value,
+    "baroda": Institution.BANK_AA2.value,
+    "bob": Institution.BANK_AA2.value,
+    "canara": Institution.BANK_AA3.value,
+    "idfc": Institution.BANK_AA4.value,
 }
 
 

@@ -12,13 +12,13 @@ from app.db.models import ChatMessage, Transaction
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are a personal spending assistant for an Indian user.
-You analyze transactions from multiple bank accounts (HSBC, BOB, Canara, IDFC via Account Aggregator)
-and HSBC credit card (from PDF statements).
+You analyze transactions from bank accounts (via Account Aggregator)
+and credit card statements (from PDF uploads).
 
 Use the provided tools to query real transaction data. Never invent amounts.
 Format currency as ₹ with Indian numbering (e.g. ₹1,23,456.78).
 Today's date is {today}.
-Default to last 30 days when the user doesn't specify a period.
+Default to last 90 days when the user doesn't specify a period.
 Be concise and helpful. If no transactions exist, tell the user to /connect banks or upload a credit card PDF.
 """
 
@@ -60,7 +60,7 @@ async def chat_with_agent(db: Session, user_id: int, user_message: str) -> str:
                 "Gemini API is not configured yet. Add GEMINI_API_KEY to enable spending analysis.\n\n"
                 "Meanwhile:\n"
                 "• /connect — link bank accounts\n"
-                "• Send a PDF — import HSBC credit card statement"
+                "• Send a PDF — import credit card statement"
             )
         return "GEMINI_API_KEY is not set. Add it to enable AI spending analysis."
 
@@ -83,11 +83,18 @@ async def chat_with_agent(db: Session, user_id: int, user_message: str) -> str:
     )
 
     for _ in range(5):
-        response = client.models.generate_content(
-            model=settings.llm_model,
-            contents=contents,
-            config=config,
-        )
+        try:
+            response = client.models.generate_content(
+                model=settings.llm_model,
+                contents=contents,
+                config=config,
+            )
+        except Exception as e:
+            err = str(e)
+            if "429" in err or "RESOURCE_EXHAUSTED" in err:
+                return "Gemini API rate limit reached (20 free requests/day). Try again later or upgrade at ai.google.dev."
+            logger.exception("Gemini API error")
+            return f"Sorry, I hit an error: {err[:200]}"
 
         if not response.candidates:
             return "I couldn't generate a response. Please try again."

@@ -56,7 +56,7 @@ class SetuClient:
 
         payload = {
             "vua": vua,
-            "consentMode": "VIEW",
+            "consentMode": "STORE",
             "fetchType": "PERIODIC",
             "consentTypes": ["TRANSACTIONS", "PROFILE", "SUMMARY"],
             "fiTypes": ["DEPOSIT"],
@@ -69,8 +69,9 @@ class SetuClient:
             "frequency": {"unit": "MONTH", "value": 1},
             "purpose": {
                 "code": "104",
+                "refUri": "https://api.rebit.org.in/aa/purpose/104.xml",
                 "text": "Personal finance management and spending analysis",
-                "ref": "PFM_Spending_Bot",
+                "category": {"type": "string"},
             },
             "redirectUrl": self.settings.setu_redirect_url,
         }
@@ -81,6 +82,8 @@ class SetuClient:
                 headers=self._headers(token),
                 json=payload,
             )
+            if not response.is_success:
+                logger.error("Setu consent error %s: %s", response.status_code, response.text)
             response.raise_for_status()
             return response.json()
 

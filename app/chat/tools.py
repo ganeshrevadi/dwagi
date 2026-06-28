@@ -230,5 +230,5 @@ def execute_tool(db: Session, user_id: int, name: str, args: dict) -> dict:
 
 def default_date_range() -> tuple[str, str]:
     end = date.today()
-    start = end - timedelta(days=30)
+    start = end - timedelta(days=90)
     return start.isoformat(), end.isoformat()

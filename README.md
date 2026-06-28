@@ -1,12 +1,12 @@
 # DWAGI — Telegram Spending Bot + Job Tracker
 
-Personal spending analysis bot for Telegram, now with an automated job tracker. Fetches real bank transactions from **HSBC, BOB, Canara, and IDFC** via India's Account Aggregator (Setu), imports **HSBC credit card** bills from PDF, answers spending questions with Gemini, and monitors job openings at companies with 500+ employees.
+Personal spending analysis bot for Telegram, now with an automated job tracker. Fetches real bank transactions via India's Account Aggregator (Setu), imports credit card PDF statements, answers spending questions with Gemini, and monitors job openings at companies with 500+ employees.
 
 ## Features
 
 ### Spending
 - **Bank accounts** — consent-based fetch via Setu Account Aggregator (`/connect`)
-- **HSBC credit card** — upload e-statement PDF in Telegram chat
+- **Credit card** — upload e-statement PDF in Telegram chat
 - **Spending chat** — natural language questions powered by Gemini + structured DB queries
 - **Unified view** — all accounts in one transaction store
 
@@ -59,7 +59,7 @@ ngrok http 8000
 |---------|-------------|
 | `/start` | Welcome |
 | `/connect 9876543210` | Link bank accounts via Account Aggregator |
-| `/upload` | Instructions for HSBC credit card PDF |
+| `/upload` | Instructions for credit card PDF |
 | `/status` | Transaction count and consent status |
 | `/sync` | Manually refresh bank transactions |
 | `/jobs` | Today's matching jobs |
@@ -69,7 +69,7 @@ ngrok http 8000
 | `/pipeline` | Application summary |
 | `/scan` | Run job search now |
 | `/profile` | Show your search profile |
-| Send PDF | Import HSBC credit card statement |
+| Send PDF | Import credit card statement |
 | Any text | Ask spending questions |
 
 ## Deploy to Render (free)
@@ -97,7 +97,7 @@ ngrok http 8000
 
 1. Complete KYC on Setu Bridge (Step 4–5)
 2. Set `SETU_ENV=production` and production `SETU_BASE_URL` from Setu
-3. Link HSBC, BOB, Canara, IDFC accounts in the AA consent flow
+3. Link your bank accounts in the AA consent flow
 4. Expect ~₹10–25 per successful data fetch
 
 ## Environment variables
@@ -134,7 +134,7 @@ Find your Telegram user ID: message [@userinfobot](https://t.me/userinfobot).
 ```
 Telegram → FastAPI webhook → Postgres
                 ↓
-         Setu AA (banks) + PDF parser (HSBC card)
+         Setu AA (banks) + PDF parser (credit card)
                 ↓
          Gemini (tool-calling over transactions)
                 ↓
@@ -154,7 +154,7 @@ app/
 ├── db/                  # SQLAlchemy models
 ├── telegram/            # Bot client + handlers
 ├── banking/             # Setu AA integration
-├── statements/          # HSBC PDF parser
+├── statements/          # Credit card PDF parser
 ├── chat/                # Gemini agent + query tools
 ├── jobs/                # Job tracker module
 │   ├── models.py        # Job, JobApplication, Company tables

@@ -23,14 +23,15 @@ class Base(DeclarativeBase):
 class TransactionSource(str, Enum):
     AA_DEPOSIT = "aa_deposit"
     PDF_CREDIT_CARD = "pdf_credit_card"
+    PDF_BANK_STATEMENT = "pdf_bank_statement"
 
 
 class Institution(str, Enum):
-    HSBC = "hsbc"
-    BOB = "bob"
-    CANARA = "canara"
-    IDFC = "idfc"
-    HSBC_CC = "hsbc_cc"
+    BANK_AA = "bank_aa"
+    BANK_AA2 = "bank_aa2"
+    BANK_AA3 = "bank_aa3"
+    BANK_AA4 = "bank_aa4"
+    CREDIT_CARD = "credit_card"
     UNKNOWN = "unknown"
 
 

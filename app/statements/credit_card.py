@@ -9,6 +9,7 @@ DATE_PATTERNS = [
 ]
 
 AMOUNT_PATTERN = re.compile(r"([\d,]+\.\d{2})")
+TRAILING_MARKER = re.compile(r"\s+(Cr|Dr|CR|DR)\s*$")
 
 
 def _parse_date(match: re.Match[str]) -> datetime.date | None:
@@ -23,8 +24,8 @@ def _parse_date(match: re.Match[str]) -> datetime.date | None:
     return None
 
 
-def parse_hsbc_credit_statement(pdf_bytes: bytes) -> list[ParsedTransaction]:
-    """Parse HSBC India credit card statement PDF into transactions."""
+def parse_credit_statement(pdf_bytes: bytes) -> list[ParsedTransaction]:
+    """Parse credit card statement PDF into transactions."""
     text = extract_text_from_pdf(pdf_bytes)
     rows = extract_table_rows(pdf_bytes)
     transactions: list[ParsedTransaction] = []
@@ -56,11 +57,13 @@ def parse_hsbc_credit_statement(pdf_bytes: bytes) -> list[ParsedTransaction]:
         amount = float(amount_str)
         description = line[: date_match.start()].strip() or line[date_match.end() :].strip()
         description = AMOUNT_PATTERN.sub("", description).strip()
+        description = TRAILING_MARKER.sub("", description).strip()
         if not description:
-            description = "HSBC credit card transaction"
+            description = "Credit card transaction"
 
+        desc_lower = description.lower().strip()
         txn_type = "DEBIT"
-        if any(cr in line.lower() for cr in (" cr", "credit", "refund", "payment received")):
+        if desc_lower in ("cr", "credit") or any(kw in desc_lower for kw in ("credit", "refund", "payment received", " paid")):
             txn_type = "CREDIT"
 
         transactions.append(
