@@ -1,177 +1,263 @@
 # DWAGI — Telegram Spending Bot + Job Tracker
 
-Personal spending analysis bot for Telegram, now with an automated job tracker. Fetches real bank transactions via India's Account Aggregator (Setu), imports credit card PDF statements, answers spending questions with Gemini, and monitors job openings at companies with 500+ employees.
+Personal finance analysis and SWE job discovery bot for Telegram. Fetches bank transactions via India's Account Aggregator (Setu) or PDF import, answers spending questions with Gemini, and automatically discovers Software Engineering jobs at companies with 500+ employees.
 
 ## Features
 
 ### Spending
-- **Bank accounts** — consent-based fetch via Setu Account Aggregator (`/connect`)
-- **Credit card** — upload e-statement PDF in Telegram chat
-- **Spending chat** — natural language questions powered by Gemini + structured DB queries
-- **Unified view** — all accounts in one transaction store
+- **Bank accounts** — consent-based fetch via Setu Account Aggregator (`/connect <phone>`)
+- **Credit card statements** — upload e-statement PDF, automatically parsed
+- **Bank statements** — upload savings/current account PDF, automatically parsed
+- **Spending chat** — ask questions in plain English ("how much did I spend on food last month?")
+- **Unified view** — all sources in one transaction store, categorized automatically
 
 ### Job Tracker
-- **Multi-source scraping** — Google Jobs (aggregator), Greenhouse, Lever, RemoteOK, and LinkedIn
-- **Company filter** — only jobs at companies with 500+ employees (100+ companies pre-curated)
-- **Profile matching** — scores jobs against your skills, target titles, locations, and salary
-- **Referral suggestions** — flags jobs at competitive companies where a referral would help
-- **Application pipeline** — tracks discovered → applied → interviewing → offer status
-- **Twice-daily scans** — automatic morning (8 AM) and evening (6 PM) job digests via Telegram
+- **Multi-source scraping** — Greenhouse, Ashby, LinkedIn, RemoteOK, Adzuna (opt-in)
+- **Company filter** — only jobs at companies with 500+ employees (169 companies pre-curated)
+- **Resume-driven profile** — upload your resume PDF, skills and target titles extracted automatically
+- **Seniority filtering** — blocks Senior (4y), Staff (5y), Manager (4y) roles if your profile shows 3 YoE
+- **Scoring** — ranks jobs by skills match, location, salary
+- **Referral suggestions** — flags competitive companies where a referral helps
+- **Pipeline tracking** — discovered → applied → interviewing → offer
+- **On-demand scans** — `/scan` runs all scrapers immediately
+- **Location filter** — Bangalore, Remote (work-from-India), other Indian cities
 
-## Quick start (local)
+### Architecture
 
-### 1. Prerequisites
+```
+Telegram ←→ FastAPI ←→ Postgres
+                ↓
+         Setu AA (banks) + PDF parser (credit card + bank statement)
+                ↓
+         Gemini (tool-calling AI over transactions)
+                ↓
+         Job scrapers (Greenhouse, Ashby, LinkedIn, RemoteOK, Adzuna)
+                ↓
+         Matcher (resume profile + seniority + company size → scoring)
+```
 
+## Quick start
+
+### Prerequisites
 - Python 3.11+
 - PostgreSQL (or [Neon](https://neon.tech) free tier)
 - Telegram bot token from [@BotFather](https://t.me/BotFather)
-- [Gemini API key](https://aistudio.google.com/apikey) (free)
-- [Setu Bridge](https://bridge.setu.co/) sandbox credentials (for bank linking)
+- [Gemini API key](https://aistudio.google.com/apikey) (free tier: 20 req/day)
+- [Setu Bridge](https://bridge.setu.co/) sandbox (optional, for bank linking)
 
-### 2. Setup
+### Setup
 
 ```bash
-cd puppy
+git clone https://github.com/ganeshrevadi/dwagi
+cd dwagi
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-# Edit .env with your tokens
+# Fill in your tokens (see Configuration section)
 ```
 
-### 3. Run
+### Run (long polling — simplest)
+
+```bash
+python scripts/run_polling.py
+```
+
+No ngrok, no webhooks. Bot responds via polling Telegram's API every 30 seconds.
+
+### Run (webhook mode)
 
 ```bash
 uvicorn app.main:app --reload --port 8000
 ```
 
-For local Telegram webhooks, expose with ngrok:
+Expose with ngrok for Telegram webhook + Setu callbacks:
 
 ```bash
 ngrok http 8000
 # Set PUBLIC_BASE_URL=https://xxxx.ngrok-free.app in .env
-# Restart server — webhook registers on startup
+# Restart — webhook registers on startup
 ```
 
-### 4. Telegram commands
+### Verify
+
+Open Telegram, message your bot:
+
+```
+/start
+/status
+```
+
+## Commands
 
 | Command | Description |
 |---------|-------------|
-| `/start` | Welcome |
+| `/start` | Welcome message |
+| `/help` | Full command list |
 | `/connect 9876543210` | Link bank accounts via Account Aggregator |
-| `/upload` | Instructions for credit card PDF |
-| `/status` | Transaction count and consent status |
+| `/upload` | Instructions for statement PDF upload |
+| `/status` | Transaction count and linked accounts |
 | `/sync` | Manually refresh bank transactions |
+| `/scan` | Run job search now |
 | `/jobs` | Today's matching jobs |
 | `/jobs:all` | All tracked jobs |
 | `/apply <id>` | Mark a job as applied |
-| `/referrals` | Jobs where a referral would help |
+| `/referrals` | Jobs needing a referral |
 | `/pipeline` | Application summary |
-| `/scan` | Run job search now |
 | `/profile` | Show your search profile |
-| Send PDF | Import credit card statement |
-| Any text | Ask spending questions |
+| `/resume` | Show parsed resume data |
+| *Send PDF named "resume"* | Upload/update your resume |
+| *Send any PDF* | Import credit card or bank statement |
+| *Any text* | Ask spending questions to AI |
 
-## Deploy to Render (free)
+## Spending: import your data
 
-1. Push this repo to GitHub
-2. Create a [Neon](https://neon.tech) Postgres database → copy `DATABASE_URL`
-3. [Render](https://render.com) → New Web Service → connect repo → use Dockerfile
-4. Set environment variables from `.env.example`
-5. Set `PUBLIC_BASE_URL` to your Render URL (e.g. `https://puppy.onrender.com`)
-6. [cron-job.org](https://cron-job.org) — ping `GET /health` every 14 min (keeps free tier awake)
-7. Optional: schedule `POST /sync` weekly for bank refresh
-8. Schedule `POST /jobs/scan` twice daily (8 AM, 6 PM) for automatic job scans
+### Option A: Bank statement PDF (easiest)
 
-## Setu Account Aggregator setup
+1. Download your bank e-statement from net banking or email
+2. Send the PDF to the bot (include "statement" in filename for best results)
+3. Bot parses transactions and categorizes them automatically
 
-### Sandbox (development)
+Supports: SBI, HDFC, ICICI, Axis, and most Indian bank PDFs.
 
-1. Register at [Setu Bridge](https://bridge.setu.co/)
-2. Create FIU → Account Aggregator product
-3. Set notification URL: `{PUBLIC_BASE_URL}/setu/webhook`
-4. Copy `client_id`, `client_secret`, `product_instance_id` to `.env`
-5. Test with `/connect <your-10-digit-mobile>`
+### Option B: Credit card PDF
 
-### Production (real bank data)
+Same flow — send your credit card e-statement PDF. Bot auto-detects it.
 
-1. Complete KYC on Setu Bridge (Step 4–5)
-2. Set `SETU_ENV=production` and production `SETU_BASE_URL` from Setu
-3. Link your bank accounts in the AA consent flow
-4. Expect ~₹10–25 per successful data fetch
+### Option C: Setu Account Aggregator (automated)
 
-## Environment variables
+Connect your bank accounts for automatic transaction fetching:
 
-See [`.env.example`](.env.example) for the full list.
+```
+/connect 9876543210
+```
+
+You'll receive a consent link. Approve it via your bank's AA app to grant read-only access.
+
+**Pricing**: Sandbox is free. Production costs ~₹10–25 per successful data fetch (you pay Setu).
+
+**Note**: Production use requires KYC + Sahamati certification on Setu Bridge. For personal use, PDF upload is simpler and free.
+
+## Job Tracker: configure your search
+
+### 1. Upload your resume
+
+Send a PDF named "resume" to the bot. Skills and target titles are extracted automatically.
+
+### 2. Override in `.env` (optional)
+
+```env
+PROFILE_EXPERIENCE_YEARS=3  # Overrides resume's experience_years
+PROFILE_SKILLS=python,go,aws  # Comma-separated (adds to resume skills)
+PROFILE_LOCATIONS=Bangalore,Remote  # Preferred locations
+PROFILE_MIN_SALARY=2500000  # Minimum annual salary in INR
+```
+
+### 3. Run a scan
+
+```
+/scan
+```
+
+Jobs are scored and ranked in the reply. Refine your profile and scan again.
+
+### Scrapers
+
+| Scraper | Key | Jobs per scan | Notes |
+|---------|-----|---------------|-------|
+| Greenhouse | None | ~15–30 | 36 company boards pre-configured |
+| Ashby | None | ~5–8 | Open API, no key needed |
+| LinkedIn | None | ~30 | India-filtered, works without auth |
+| RemoteOK | None | ~20 | Remote-first, global |
+| Adzuna | `ADZUNA_APP_ID` + `ADZUNA_API_KEY` | ~50+ | India jobs, free API key from developer.adzuna.com |
+
+Enable/disable individual scrapers via `.env` (`GREENHOUSE_ENABLED=true` etc).
+
+## Configuration
+
+Copy `.env.example` to `.env` and fill in:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `TELEGRAM_BOT_TOKEN` | Yes | From BotFather |
 | `TELEGRAM_SECRET_TOKEN` | Yes | Random string for webhook security |
-| `ALLOWED_TELEGRAM_USER_IDS` | Recommended | Your Telegram user ID (comma-separated) |
+| `ALLOWED_TELEGRAM_USER_IDS` | Yes | Your Telegram user ID (comma-separated) |
 | `DATABASE_URL` | Yes | Postgres connection string |
-| `PUBLIC_BASE_URL` | Yes | Public HTTPS URL of this app |
-| `GEMINI_API_KEY` | Yes | For spending chat |
-| `SETU_CLIENT_ID` | For banks | Setu Bridge credentials |
-| `SETU_CLIENT_SECRET` | For banks | Setu Bridge credentials |
-| `SETU_PRODUCT_INSTANCE_ID` | For banks | Setu product ID |
+| `PUBLIC_BASE_URL` | Webhook | Public HTTPS URL (needed for Setu callbacks) |
+| `GEMINI_API_KEY` | Yes | For AI spending chat (free tier: 20 req/day) |
+| `SETU_CLIENT_ID` | Optional | Setu Bridge credentials |
+| `SETU_CLIENT_SECRET` | Optional | Setu Bridge credentials |
+| `SETU_PRODUCT_INSTANCE_ID` | Optional | Setu product ID |
 | `JOB_SCAN_ENABLED` | No | Enable job tracker (default: true) |
-| `COMPANY_MIN_EMPLOYEES` | No | Minimum company size to track (default: 500) |
-| `GOOGLE_JOBS_ENABLED` | No | Enable Google Jobs scraper |
-| `GREENHOUSE_ENABLED` | No | Enable Greenhouse API scraper |
-| `LEVER_ENABLED` | No | Enable Lever API scraper |
-| `REMOTEOK_ENABLED` | No | Enable RemoteOK scraper |
-| `LINKEDIN_ENABLED` | No | Enable LinkedIn scraper (may need rotation) |
-| `PROFILE_SKILLS` | No | Comma-separated skills for job matching |
-| `PROFILE_TARGET_TITLES` | No | Comma-separated target job titles |
-| `PROFILE_LOCATIONS` | No | Comma-separated preferred locations |
-| `PROFILE_MIN_SALARY` | No | Minimum salary threshold |
+| `COMPANY_MIN_EMPLOYEES` | No | Minimum company size (default: 500) |
+| `PROFILE_EXPERIENCE_YEARS` | No | Overrides resume experience (default: resume value) |
+| `PROFILE_SKILLS` | No | Extra skills beyond resume (comma-separated) |
+| `PROFILE_TARGET_TITLES` | No | Override resume titles (comma-separated) |
+| `PROFILE_LOCATIONS` | No | Preferred locations (comma-separated) |
+| `PROFILE_MIN_SALARY` | No | Minimum annual salary in INR |
+| `GREENHOUSE_ENABLED` | No | Enable Greenhouse scraper (default: true) |
+| `ASHBY_ENABLED` | No | Enable Ashby scraper (default: true) |
+| `LINKEDIN_ENABLED` | No | Enable LinkedIn scraper (default: true) |
+| `REMOTEOK_ENABLED` | No | Enable RemoteOK scraper (default: true) |
+| `ADZUNA_APP_ID` | No | Adzuna API app ID |
+| `ADZUNA_API_KEY` | No | Adzuna API key |
 
 Find your Telegram user ID: message [@userinfobot](https://t.me/userinfobot).
-
-## Architecture
-
-```
-Telegram → FastAPI webhook → Postgres
-                ↓
-         Setu AA (banks) + PDF parser (credit card)
-                ↓
-         Gemini (tool-calling over transactions)
-                ↓
-         Job Scrapers (Google Jobs, Greenhouse, Lever, RemoteOK, LinkedIn)
-                ↓
-         Matcher (profile scoring + company size filter)
-                ↓
-         Telegram digest (morning + evening)
-```
 
 ## Project structure
 
 ```
 app/
-├── main.py              # FastAPI app
-├── config.py            # Settings
-├── db/                  # SQLAlchemy models
-├── telegram/            # Bot client + handlers
-├── banking/             # Setu AA integration
-├── statements/          # Credit card PDF parser
-├── chat/                # Gemini agent + query tools
-├── jobs/                # Job tracker module
-│   ├── models.py        # Job, JobApplication, Company tables
-│   ├── company_db.py    # Curated companies with employee counts
-│   ├── matcher.py       # Profile-based job scoring
-│   ├── scanner.py       # Orchestrator (run scrapers → match → store)
-│   ├── telegram_commands.py  # Telegram command handlers
-│   ├── router.py        # HTTP endpoints
-│   ├── config.py        # Job-specific settings
+├── main.py                  # FastAPI app + startup
+├── config.py                # Pydantic settings
+├── db/                      # SQLAlchemy models + session
+│   ├── models.py            # User, Transaction, Consent, Job, ...
+│   └── session.py           # Engine + SessionLocal
+├── telegram/                # Bot client + handlers
+│   ├── client.py            # Telegram API wrapper
+│   ├── handler.py           # Message/document routing
+│   └── security.py          # Access control
+├── banking/                 # Setu AA integration
+│   ├── setu_client.py       # Consent + data fetch API
+│   ├── sync.py              # FIP mapping + ingestion
+│   └── categorizer.py       # Rule-based spending categories
+├── statements/              # PDF parsers
+│   ├── pdf_parser.py        # Shared extract utilities
+│   ├── credit_card.py       # Credit card statement parser
+│   └── bank_statement.py    # Bank statement parser
+├── chat/                    # Gemini AI agent
+│   ├── agent.py             # Tool-calling loop with Gemini
+│   └── tools.py             # Transaction query functions
+├── jobs/                    # Job tracker module
+│   ├── models.py            # Job, JobApplication, Company
+│   ├── company_db.py        # 169 curated companies
+│   ├── matcher.py           # Profile scoring + seniority filter
+│   ├── scanner.py           # Scraper orchestrator
+│   ├── telegram_commands.py # Bot command handlers
+│   ├── router.py            # HTTP endpoints (/jobs/scan)
+│   ├── config.py            # Job-specific settings
 │   └── scrapers/
-│       ├── google_jobs.py   # Google Jobs scraper
-│       ├── greenhouse.py    # Greenhouse API scraper
-│       ├── lever.py         # Lever API scraper
-│       ├── remoteok.py      # RemoteOK API scraper
-│       └── linkedin.py      # LinkedIn scraper
-└── routers/             # HTTP endpoints
+│       ├── greenhouse.py    # Greenhouse API
+│       ├── ashby.py         # Ashby API (open)
+│       ├── linkedin.py      # LinkedIn scraping
+│       ├── remoteok.py      # RemoteOK API
+│       └── adzuna.py        # Adzuna API (needs key)
+├── routers/                 # FastAPI route modules
+│   ├── telegram.py          # Telegram webhook endpoint
+│   ├── setu.py              # Setu AA webhook
+│   ├── health.py            # Health check
+│   └── transactions.py      # Transaction API
+└── scripts/
+    └── run_polling.py       # Long-polling entry point
 ```
+
+## Known limitations
+
+- **Google Jobs scraper**: Blocked by Google (bot detection). Not included in active scrapers.
+- **Lever scraper**: All 3 pre-configured boards (Shopify, Asana, Uber) return 404. Disabled by default.
+- **Gemini free tier**: 20 requests/day. Upgrade at [ai.google.dev](https://ai.google.dev) for higher quotas.
+- **Setu production**: Requires KYC + Sahamati certification. Sandbox works for testing; PDF upload is the practical path for personal use.
+- **LinkedIn**: No API key needed but may rate-limit after frequent scans.
 
 ## License
 
