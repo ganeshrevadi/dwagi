@@ -30,13 +30,16 @@ class TelegramClient:
     async def send_message(
         self, chat_id: int, text: str, parse_mode: str | None = None,
         disable_web_page_preview: bool = False,
-    ) -> None:
+        reply_markup: dict | None = None,
+    ) -> dict[str, Any] | None:
         payload: dict[str, Any] = {"chat_id": chat_id, "text": text}
         if parse_mode:
             payload["parse_mode"] = parse_mode
         if disable_web_page_preview:
             payload["disable_web_page_preview"] = True
-        await self._post("sendMessage", payload)
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        return await self._post("sendMessage", payload)
 
     async def send_message_chunked(self, chat_id: int, text: str, chunk_size: int = 4000) -> None:
         if len(text) <= chunk_size:
@@ -56,6 +59,20 @@ class TelegramClient:
             download = await client.get(f"{TELEGRAM_API}/file/bot{self.settings.telegram_bot_token}/{file_path}")
             download.raise_for_status()
             return download.content
+
+    async def answer_callback_query(self, callback_query_id: str, text: str | None = None) -> None:
+        payload: dict[str, Any] = {"callback_query_id": callback_query_id}
+        if text:
+            payload["text"] = text
+        await self._post("answerCallbackQuery", payload)
+
+    async def edit_message_reply_markup(
+        self, chat_id: int, message_id: int, reply_markup: dict | None = None,
+    ) -> None:
+        payload: dict[str, Any] = {"chat_id": chat_id, "message_id": message_id}
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        await self._post("editMessageReplyMarkup", payload)
 
     async def set_webhook(self) -> dict[str, Any]:
         payload: dict[str, Any] = {"url": self.settings.telegram_webhook_url}

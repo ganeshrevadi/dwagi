@@ -14,6 +14,7 @@ from app.statements.credit_card import parse_credit_statement
 from app.statements.pdf_parser import ParsedTransaction
 from app.jobs.telegram_commands import (
     handle_apply_command,
+    handle_dismiss_callback,
     handle_jobs_command,
     handle_pipeline_command,
     handle_profile_command,
@@ -56,6 +57,10 @@ Ask spending questions in plain English:
 
 async def handle_update(db: Session, update: dict) -> None:
     client = TelegramClient()
+
+    if "callback_query" in update:
+        await _handle_callback_query(db, client, update["callback_query"])
+        return
 
     if "message" not in update:
         return
@@ -313,6 +318,24 @@ def _import_statement(
         inserted += 1
     db.commit()
     return inserted
+
+
+async def _handle_callback_query(db: Session, client: TelegramClient, cq: dict) -> None:
+    data = cq.get("data", "")
+    chat_id = cq["message"]["chat"]["id"]
+    message_id = cq["message"]["message_id"]
+    callback_id = cq["id"]
+
+    if data.startswith("dismiss:"):
+        try:
+            job_id = int(data.split(":", 1)[1])
+        except (ValueError, IndexError):
+            await client.answer_callback_query(callback_id, "Invalid job")
+            return
+        await handle_dismiss_callback(db, client, chat_id, message_id, job_id)
+        await client.answer_callback_query(callback_id, "Dismissed")
+    else:
+        await client.answer_callback_query(callback_id, "Unknown action")
 
 
 async def handle_setu_notification(db: Session, payload: dict) -> None:

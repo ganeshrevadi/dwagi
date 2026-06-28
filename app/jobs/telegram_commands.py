@@ -1,5 +1,6 @@
 import logging
 from datetime import date
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -28,6 +29,16 @@ JOBS_HELP = """Job Tracker Commands:
 /resume — Show your parsed resume profile
 /upload_resume — Send your resume PDF to parse"""
 
+# Track which job IDs are shown in which messages so dismiss buttons can edit the correct keyboard.
+# _chat_message_jobs[chat_id][message_id] = [job_id, ...]
+_chat_message_jobs: dict[int, dict[int, list[int]]] = {}
+
+BATCH_SIZE = 5
+
+
+def _esc(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
 
 async def handle_jobs_command(db: Session, client: TelegramClient, user: User, chat_id: int, arg: str) -> None:
     if arg == "all":
@@ -45,8 +56,7 @@ async def handle_jobs_command(db: Session, client: TelegramClient, user: User, c
         for j in jobs:
             app = db.query(JobApplication).filter(JobApplication.job_id == j.id).first()
             status = f" [{app.status}]" if app else ""
-            title = j.title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            lines.append(f"• #{j.id} <a href=\"{j.url}\">{title} @ {j.company_name}</a>{status}")
+            lines.append(f"• #{j.id} <a href=\"{j.url}\">{_esc(j.title)} @ {j.company_name}</a>{status}")
         await client.send_message(chat_id, "\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
         return
 
@@ -61,13 +71,64 @@ async def handle_jobs_command(db: Session, client: TelegramClient, user: User, c
         return
 
     matched = [j for j in new_jobs if j.match_score and j.match_score >= 30]
-    lines = [f"🔍 New Jobs Today — {len(matched)} matching your profile"]
-    for j in matched[:10]:
-        title = j.title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        lines.append(f"• #{j.id} <a href=\"{j.url}\">{title} @ {j.company_name}</a>")
-    if len(matched) > 10:
-        lines.append(f"... and {len(matched) - 10} more (use /jobs:all to see all)")
-    await client.send_message(chat_id, "\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
+    total = len(matched)
+    if total == 0:
+        await client.send_message(chat_id, "No jobs matching your profile today. Run /scan to check again.")
+        return
+
+    await _send_job_batches(client, db, chat_id, matched, total)
+
+
+async def _send_job_batches(
+    client: TelegramClient, db: Session, chat_id: int, jobs: list[Job], total: int,
+) -> None:
+    batches = [jobs[i:i + BATCH_SIZE] for i in range(0, len(jobs), BATCH_SIZE)]
+    for batch in batches:
+        lines: list[str] = []
+        keyboard: list[list[dict[str, str]]] = []
+        for j in batch:
+            lines.append(f"• #{j.id} <a href=\"{j.url}\">{_esc(j.title)} @ {j.company_name}</a>")
+            keyboard.append([{"text": "Dismiss", "callback_data": f"dismiss:{j.id}"}])
+        if total > BATCH_SIZE:
+            lines.append(f"\n{total} matching jobs — dismiss ones you've seen")
+        else:
+            lines.append("\nTap Dismiss to remove from this list")
+
+        reply_markup = {"inline_keyboard": keyboard}
+        result = await client.send_message(
+            chat_id, "\n".join(lines),
+            parse_mode="HTML", disable_web_page_preview=True,
+            reply_markup=reply_markup,
+        )
+        if result and result.get("ok") and result.get("result", {}).get("message_id"):
+            msg_id = result["result"]["message_id"]
+            _chat_message_jobs.setdefault(chat_id, {})[msg_id] = [j.id for j in batch]
+
+
+async def handle_dismiss_callback(
+    db: Session, client: TelegramClient, chat_id: int, message_id: int, job_id: int,
+) -> None:
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if job:
+        app = db.query(JobApplication).filter(JobApplication.job_id == job.id).first()
+        if app and app.status == "discovered":
+            app.status = "dismissed"
+            db.commit()
+        elif not app:
+            app = JobApplication(job_id=job.id, status="dismissed")
+            db.add(app)
+            db.commit()
+
+    # Rebuild keyboard: remove the dismissed button
+    msg_jobs = _chat_message_jobs.get(chat_id, {}).get(message_id, [])
+    remaining = [jid for jid in msg_jobs if jid != job_id]
+    if remaining:
+        _chat_message_jobs[chat_id][message_id] = remaining
+        new_keyboard = [[{"text": "Dismiss", "callback_data": f"dismiss:{jid}"}] for jid in remaining]
+        await client.edit_message_reply_markup(chat_id, message_id, {"inline_keyboard": new_keyboard})
+    else:
+        _chat_message_jobs[chat_id].pop(message_id, None)
+        await client.edit_message_reply_markup(chat_id, message_id, None)
 
 
 async def handle_apply_command(db: Session, client: TelegramClient, user: User, chat_id: int, arg: str) -> None:
