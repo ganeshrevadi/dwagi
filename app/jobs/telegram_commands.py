@@ -42,17 +42,26 @@ def _esc(text: str) -> str:
 
 async def handle_jobs_command(db: Session, client: TelegramClient, user: User, chat_id: int, arg: str) -> None:
     if arg == "all":
-        jobs = (
+        # For /jobs:all, exclude dismissed from the displayed list
+        all_jobs = (
             db.query(Job)
             .order_by(Job.match_score.desc(), Job.found_at.desc())
             .limit(50)
             .all()
         )
-        if not jobs:
+        if not all_jobs:
             await client.send_message(chat_id, "No jobs tracked yet. Run /scan first.")
             return
 
-        lines = [f"📋 All Tracked Jobs ({len(jobs)})"]
+        dismissed_ids = {
+            ja.job_id for ja in db.query(JobApplication.job_id).filter(JobApplication.status == "dismissed").all()
+        }
+        jobs = [j for j in all_jobs if j.id not in dismissed_ids]
+        if not jobs:
+            await client.send_message(chat_id, "All tracked jobs have been dismissed. Run /scan to find new ones.")
+            return
+
+        lines = [f"📋 Tracked Jobs ({len(jobs)} shown, {len(all_jobs) - len(jobs)} dismissed)"]
         for j in jobs:
             app = db.query(JobApplication).filter(JobApplication.job_id == j.id).first()
             status = f" [{app.status}]" if app else ""
@@ -60,6 +69,11 @@ async def handle_jobs_command(db: Session, client: TelegramClient, user: User, c
         await client.send_message(chat_id, "\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
         return
 
+    done_ids = {
+        ja.job_id for ja in db.query(JobApplication.job_id).filter(
+            JobApplication.status.in_(["dismissed", "applied", "interviewing", "offer"]),
+        ).all()
+    }
     new_jobs = (
         db.query(Job)
         .filter(Job.found_at >= date.today())
@@ -70,7 +84,7 @@ async def handle_jobs_command(db: Session, client: TelegramClient, user: User, c
         await client.send_message(chat_id, "No new jobs found today. Run /scan to check.")
         return
 
-    matched = [j for j in new_jobs if j.match_score and j.match_score >= 30]
+    matched = [j for j in new_jobs if j.match_score and j.match_score >= 30 and j.id not in done_ids]
     total = len(matched)
     if total == 0:
         await client.send_message(chat_id, "No jobs matching your profile today. Run /scan to check again.")
@@ -196,7 +210,7 @@ async def handle_pipeline_command(db: Session, client: TelegramClient, user: Use
         .join(Job)
         .all()
     )
-    counts: dict[str, int] = {"discovered": 0, "applied": 0, "rejected": 0, "interviewing": 0, "offer": 0}
+    counts: dict[str, int] = {"discovered": 0, "applied": 0, "rejected": 0, "interviewing": 0, "offer": 0, "dismissed": 0}
     for status, _ in apps:
         if status in counts:
             counts[status] += 1
@@ -212,6 +226,7 @@ async def handle_pipeline_command(db: Session, client: TelegramClient, user: Use
         f"   🔄 Interviewing: {counts['interviewing']}",
         f"   ❌ Rejected: {counts['rejected']}",
         f"   🎉 Offers: {counts['offer']}",
+        f"   ╳ Dismissed: {counts['dismissed']}",
     ]
     await client.send_message(chat_id, "\n".join(lines))
 
