@@ -1,13 +1,11 @@
 # DWAGI — Telegram Spending Bot + Job Tracker
 
-Personal finance analysis and SWE job discovery bot for Telegram. Fetches bank transactions via India's Account Aggregator (Setu) or PDF import, answers spending questions with Gemini, and automatically discovers Software Engineering jobs at companies with 500+ employees.
+Personal finance analysis and SWE job discovery bot for Telegram. Parses bank and credit card statement PDFs, answers spending questions with Gemini, and automatically discovers Software Engineering jobs at companies with 500+ employees.
 
 ## Features
 
 ### Spending
-- **Bank accounts** — consent-based fetch via Setu Account Aggregator (`/connect <phone>`)
-- **Credit card statements** — upload e-statement PDF, automatically parsed
-- **Bank statements** — upload savings/current account PDF, automatically parsed
+- **Bank & credit card PDFs** — upload e-statements, automatically parsed and categorized
 - **Spending chat** — ask questions in plain English ("how much did I spend on food last month?")
 - **Unified view** — all sources in one transaction store, categorized automatically
 
@@ -27,7 +25,7 @@ Personal finance analysis and SWE job discovery bot for Telegram. Fetches bank t
 ```
 Telegram ←→ FastAPI ←→ Postgres
                 ↓
-         Setu AA (banks) + PDF parser (credit card + bank statement)
+         PDF parser (bank & credit card statements)
                 ↓
          Gemini (tool-calling AI over transactions)
                 ↓
@@ -43,8 +41,6 @@ Telegram ←→ FastAPI ←→ Postgres
 - PostgreSQL (or [Neon](https://neon.tech) free tier)
 - Telegram bot token from [@BotFather](https://t.me/BotFather)
 - [Gemini API key](https://aistudio.google.com/apikey) (free tier: 20 req/day)
-- [Setu Bridge](https://bridge.setu.co/) sandbox (optional, for bank linking)
-
 ### Setup
 
 ```bash
@@ -71,7 +67,7 @@ No ngrok, no webhooks. Bot responds via polling Telegram's API every 30 seconds.
 uvicorn app.main:app --reload --port 8000
 ```
 
-Expose with ngrok for Telegram webhook + Setu callbacks:
+Expose with ngrok for Telegram webhook:
 
 ```bash
 ngrok http 8000
@@ -94,10 +90,8 @@ Open Telegram, message your bot:
 |---------|-------------|
 | `/start` | Welcome message |
 | `/help` | Full command list |
-| `/connect 9876543210` | Link bank accounts via Account Aggregator |
 | `/upload` | Instructions for statement PDF upload |
-| `/status` | Transaction count and linked accounts |
-| `/sync` | Manually refresh bank transactions |
+| `/status` | Transaction count |
 | `/scan` | Run job search now |
 | `/jobs` | Today's matching jobs |
 | `/jobs:all` | All tracked jobs |
@@ -112,7 +106,7 @@ Open Telegram, message your bot:
 
 ## Spending: import your data
 
-### Option A: Bank statement PDF (easiest)
+### Bank statement PDF
 
 1. Download your bank e-statement from net banking or email
 2. Send the PDF to the bot (include "statement" in filename for best results)
@@ -120,23 +114,9 @@ Open Telegram, message your bot:
 
 Supports: SBI, HDFC, ICICI, Axis, and most Indian bank PDFs.
 
-### Option B: Credit card PDF
+### Credit card PDF
 
 Same flow — send your credit card e-statement PDF. Bot auto-detects it.
-
-### Option C: Setu Account Aggregator (automated)
-
-Connect your bank accounts for automatic transaction fetching:
-
-```
-/connect 9876543210
-```
-
-You'll receive a consent link. Approve it via your bank's AA app to grant read-only access.
-
-**Pricing**: Sandbox is free. Production costs ~₹10–25 per successful data fetch (you pay Setu).
-
-**Note**: Production use requires KYC + Sahamati certification on Setu Bridge. For personal use, PDF upload is simpler and free.
 
 ## Job Tracker: configure your search
 
@@ -183,11 +163,8 @@ Copy `.env.example` to `.env` and fill in:
 | `TELEGRAM_SECRET_TOKEN` | Yes | Random string for webhook security |
 | `ALLOWED_TELEGRAM_USER_IDS` | Yes | Your Telegram user ID (comma-separated) |
 | `DATABASE_URL` | Yes | Postgres connection string |
-| `PUBLIC_BASE_URL` | Webhook | Public HTTPS URL (needed for Setu callbacks) |
+| `PUBLIC_BASE_URL` | Webhook | Public HTTPS URL for Telegram webhook |
 | `GEMINI_API_KEY` | Yes | For AI spending chat (free tier: 20 req/day) |
-| `SETU_CLIENT_ID` | Optional | Setu Bridge credentials |
-| `SETU_CLIENT_SECRET` | Optional | Setu Bridge credentials |
-| `SETU_PRODUCT_INSTANCE_ID` | Optional | Setu product ID |
 | `JOB_SCAN_ENABLED` | No | Enable job tracker (default: true) |
 | `COMPANY_MIN_EMPLOYEES` | No | Minimum company size (default: 500) |
 | `PROFILE_EXPERIENCE_YEARS` | No | Overrides resume experience (default: resume value) |
@@ -211,15 +188,13 @@ app/
 ├── main.py                  # FastAPI app + startup
 ├── config.py                # Pydantic settings
 ├── db/                      # SQLAlchemy models + session
-│   ├── models.py            # User, Transaction, Consent, Job, ...
+│   ├── models.py            # User, Transaction, Job, ...
 │   └── session.py           # Engine + SessionLocal
 ├── telegram/                # Bot client + handlers
 │   ├── client.py            # Telegram API wrapper
 │   ├── handler.py           # Message/document routing
 │   └── security.py          # Access control
-├── banking/                 # Setu AA integration
-│   ├── setu_client.py       # Consent + data fetch API
-│   ├── sync.py              # FIP mapping + ingestion
+├── banking/                 # Transaction processing
 │   └── categorizer.py       # Rule-based spending categories
 ├── statements/              # PDF parsers
 │   ├── pdf_parser.py        # Shared extract utilities
@@ -244,7 +219,7 @@ app/
 │       └── adzuna.py        # Adzuna API (needs key)
 ├── routers/                 # FastAPI route modules
 │   ├── telegram.py          # Telegram webhook endpoint
-│   ├── setu.py              # Setu AA webhook
+
 │   ├── health.py            # Health check
 │   └── transactions.py      # Transaction API
 └── scripts/
@@ -256,7 +231,6 @@ app/
 - **Google Jobs scraper**: Blocked by Google (bot detection). Not included in active scrapers.
 - **Lever scraper**: All 3 pre-configured boards (Shopify, Asana, Uber) return 404. Disabled by default.
 - **Gemini free tier**: 20 requests/day. Upgrade at [ai.google.dev](https://ai.google.dev) for higher quotas.
-- **Setu production**: Requires KYC + Sahamati certification. Sandbox works for testing; PDF upload is the practical path for personal use.
 - **LinkedIn**: No API key needed but may rate-limit after frequent scans.
 
 ## License
