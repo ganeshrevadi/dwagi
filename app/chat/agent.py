@@ -12,8 +12,8 @@ from app.db.models import ChatMessage, Transaction
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are a personal spending assistant for an Indian user.
-You analyze transactions from bank accounts (via Account Aggregator)
-and credit card statements (from PDF uploads).
+You analyze transactions from bank statements and credit card statements
+imported via PDF upload.
 
 Use the provided tools to query real transaction data. Never invent amounts.
 Format currency as ₹ with Indian numbering (e.g. ₹1,23,456.78).

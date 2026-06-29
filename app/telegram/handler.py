@@ -1,14 +1,10 @@
 import logging
-import re
-from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
 from app.banking.categorizer import categorize
-from app.banking.sync import create_consent_for_user, ingest_fi_data, trigger_data_fetch
 from app.chat.agent import chat_with_agent
-from app.config import get_settings
-from app.db.models import Consent, Institution, Transaction, TransactionSource, User
+from app.db.models import Institution, Transaction, TransactionSource, User
 from app.statements.bank_statement import parse_bank_statement
 from app.statements.credit_card import parse_credit_statement
 from app.statements.pdf_parser import ParsedTransaction
@@ -32,11 +28,8 @@ HELP_TEXT = """Puppy — Spending Bot
 Commands:
 /start — Welcome message
 /help — This help
-/status — Linked accounts & transaction count
-/connect <phone> — Link bank accounts
-  Example: /connect 9876543210
-/upload — How to import credit card PDF
-/sync — Refresh bank transactions
+/status — Transaction count
+/upload — Import bank or credit card statement PDF
 
 Job Tracker:
 /jobs — New matching jobs today
@@ -114,7 +107,7 @@ async def _handle_command(db: Session, client: TelegramClient, user: User, chat_
         await client.send_message(
             chat_id,
             "Hi! I'm Puppy, your spending analysis bot.\n\n"
-            "Link bank accounts with /connect, upload credit card PDFs, "
+            "Upload credit card or bank statement PDFs, "
             "then ask me anything about your spending.\n\n"
             "Type /help for commands.",
         )
@@ -122,8 +115,6 @@ async def _handle_command(db: Session, client: TelegramClient, user: User, chat_
         await client.send_message(chat_id, HELP_TEXT)
     elif command == "/status":
         await _send_status(db, client, user, chat_id)
-    elif command == "/connect":
-        await _handle_connect(db, client, user, chat_id, arg)
     elif command == "/upload":
         await client.send_message(
             chat_id,
@@ -133,8 +124,6 @@ async def _handle_command(db: Session, client: TelegramClient, user: User, chat_
             "3. I'll parse credit card and bank statement PDFs automatically\n\n"
             "Tip: include \"statement\" in the filename for better detection",
         )
-    elif command == "/sync":
-        await _handle_sync(db, client, user, chat_id)
     elif command == "/jobs":
         await handle_jobs_command(db, client, user, chat_id, arg or "")
     elif command == "/jobs:all":
@@ -157,76 +146,11 @@ async def _handle_command(db: Session, client: TelegramClient, user: User, chat_
 
 async def _send_status(db: Session, client: TelegramClient, user: User, chat_id: int) -> None:
     txn_count = db.query(Transaction).filter(Transaction.user_id == user.id).count()
-    consents = db.query(Consent).filter(Consent.user_id == user.id).order_by(Consent.id.desc()).limit(3).all()
-
-    lines = [f"Transactions stored: {txn_count}"]
-    if consents:
-        lines.append("\nBank consents:")
-        for c in consents:
-            lines.append(f"• {c.status} — {c.setu_consent_id[:8]}...")
-    else:
-        lines.append("\nNo bank accounts linked yet. Use /connect <phone>")
-
-    lines.append("\nCredit card: send PDF statement to import")
-    await client.send_message(chat_id, "\n".join(lines))
-
-
-async def _handle_connect(db: Session, client: TelegramClient, user: User, chat_id: int, phone: str) -> None:
-    settings = get_settings()
-    if not settings.setu_configured:
-        await client.send_message(
-            chat_id,
-            "Setu Account Aggregator is not configured yet.\n"
-            "Add SETU_CLIENT_ID, SETU_CLIENT_SECRET, SETU_PRODUCT_INSTANCE_ID to .env",
-        )
-        return
-
-    phone = re.sub(r"\D", "", phone)
-    if len(phone) != 10:
-        await client.send_message(
-            chat_id,
-            "Please provide your 10-digit mobile number registered with your banks.\n"
-            "Example: /connect 9876543210",
-        )
-        return
-
-    try:
-        await client.send_message(chat_id, "Creating bank consent link...")
-        consent = await create_consent_for_user(db, user, phone)
-        if consent.consent_url:
-            await client.send_message(
-                chat_id,
-                f"Open this link to link your bank accounts:\n\n{consent.consent_url}\n\n"
-                "After approving, I'll fetch your transactions automatically.",
-            )
-        else:
-            await client.send_message(
-                chat_id,
-                f"Consent created (ID: {consent.setu_consent_id}). Check Setu dashboard for URL.",
-            )
-    except Exception as e:
-        logger.exception("Failed to create consent")
-        await client.send_message(chat_id, f"Failed to create consent: {e}")
-
-
-async def _handle_sync(db: Session, client: TelegramClient, user: User, chat_id: int) -> None:
-    consent = (
-        db.query(Consent)
-        .filter(Consent.user_id == user.id, Consent.status == "ACTIVE")
-        .order_by(Consent.id.desc())
-        .first()
+    await client.send_message(
+        chat_id,
+        f"Transactions stored: {txn_count}\n\n"
+        "Send a PDF statement to import more.",
     )
-    if not consent:
-        await client.send_message(chat_id, "No active bank consent. Use /connect first.")
-        return
-    try:
-        await client.send_message(chat_id, "Syncing bank transactions...")
-        await trigger_data_fetch(db, consent)
-        count = db.query(Transaction).filter(Transaction.user_id == user.id).count()
-        await client.send_message(chat_id, f"Sync complete. Total transactions: {count}")
-    except Exception as e:
-        logger.exception("Sync failed")
-        await client.send_message(chat_id, f"Sync failed: {e}")
 
 
 async def _handle_document(db: Session, client: TelegramClient, user: User, chat_id: int, document: dict) -> None:
@@ -338,33 +262,4 @@ async def _handle_callback_query(db: Session, client: TelegramClient, cq: dict) 
         await client.answer_callback_query(callback_id, "Unknown action")
 
 
-async def handle_setu_notification(db: Session, payload: dict) -> None:
-    notif_type = payload.get("type")
-    consent_id = payload.get("consentId")
 
-    if not consent_id:
-        return
-
-    consent = db.query(Consent).filter(Consent.setu_consent_id == consent_id).first()
-    if not consent:
-        logger.warning("Unknown consent ID in Setu notification: %s", consent_id)
-        return
-
-    if notif_type == "CONSENT_STATUS_UPDATE":
-        status = payload.get("data", {}).get("status") or payload.get("status")
-        if status:
-            consent.status = status
-            consent.updated_at = datetime.now(timezone.utc)
-            db.commit()
-        if status == "ACTIVE":
-            try:
-                await trigger_data_fetch(db, consent)
-            except Exception:
-                logger.exception("Auto-fetch after consent activation failed")
-
-    elif notif_type in ("SESSION_STATUS_UPDATE", "FI_DATA_READY"):
-        user = db.query(User).filter(User.id == consent.user_id).first()
-        if user:
-            ingest_fi_data(db, user, payload.get("data") or payload)
-            if notif_type == "FI_DATA_READY":
-                ingest_fi_data(db, user, payload)
