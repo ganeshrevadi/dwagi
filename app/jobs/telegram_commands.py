@@ -29,11 +29,9 @@ JOBS_HELP = """Job Tracker Commands:
 /resume — Show your parsed resume profile
 /upload_resume — Send your resume PDF to parse"""
 
-# Track which job IDs are shown in which messages so dismiss buttons can edit the correct keyboard.
-# _chat_message_jobs[chat_id][message_id] = [job_id, ...]
-_chat_message_jobs: dict[int, dict[int, list[int]]] = {}
-
-BATCH_SIZE = 5
+# Track which job is in each message so dismiss can edit the right one.
+# _chat_message_jobs[chat_id][message_id] = job_id
+_chat_message_jobs: dict[int, dict[int, int]] = {}
 
 
 def _esc(text: str) -> str:
@@ -96,27 +94,27 @@ async def handle_jobs_command(db: Session, client: TelegramClient, user: User, c
 async def _send_job_batches(
     client: TelegramClient, db: Session, chat_id: int, jobs: list[Job], total: int,
 ) -> None:
-    batches = [jobs[i:i + BATCH_SIZE] for i in range(0, len(jobs), BATCH_SIZE)]
-    for batch in batches:
-        lines: list[str] = []
-        keyboard: list[list[dict[str, str]]] = []
-        for j in batch:
-            lines.append(f"• #{j.id} <a href=\"{j.url}\">{_esc(j.title)} @ {j.company_name}</a>")
-            keyboard.append([{"text": "Dismiss", "callback_data": f"dismiss:{j.id}"}])
-        if total > BATCH_SIZE:
-            lines.append(f"\n{total} matching jobs — dismiss ones you've seen")
-        else:
-            lines.append("\nTap Dismiss to remove from this list")
+    await client.send_message(
+        chat_id,
+        f"🔍 New Jobs Today — {total} matching your profile\n\n"
+        "Each job below has a <b>Dismiss</b> button — tap to remove from your list.",
+        parse_mode="HTML",
+    )
+    for j in jobs:
+        header = f"#{j.id} <a href=\"{j.url}\">{_esc(j.title)} @ {j.company_name}</a>"
+        score_line = f"Score: {j.match_score:.0f}" if j.match_score else ""
+        loc_line = f" — {j.location}" if j.location else ""
+        text = f"{header}{loc_line}  [{score_line}]"
 
-        reply_markup = {"inline_keyboard": keyboard}
+        reply_markup = {"inline_keyboard": [[{"text": "Dismiss", "callback_data": f"dismiss:{j.id}"}]]}
         result = await client.send_message(
-            chat_id, "\n".join(lines),
+            chat_id, text,
             parse_mode="HTML", disable_web_page_preview=True,
             reply_markup=reply_markup,
         )
         if result and result.get("ok") and result.get("result", {}).get("message_id"):
             msg_id = result["result"]["message_id"]
-            _chat_message_jobs.setdefault(chat_id, {})[msg_id] = [j.id for j in batch]
+            _chat_message_jobs.setdefault(chat_id, {})[msg_id] = j.id
 
 
 async def handle_dismiss_callback(
@@ -133,16 +131,12 @@ async def handle_dismiss_callback(
             db.add(app)
             db.commit()
 
-    # Rebuild keyboard: remove the dismissed button
-    msg_jobs = _chat_message_jobs.get(chat_id, {}).get(message_id, [])
-    remaining = [jid for jid in msg_jobs if jid != job_id]
-    if remaining:
-        _chat_message_jobs[chat_id][message_id] = remaining
-        new_keyboard = [[{"text": "Dismiss", "callback_data": f"dismiss:{jid}"}] for jid in remaining]
-        await client.edit_message_reply_markup(chat_id, message_id, {"inline_keyboard": new_keyboard})
-    else:
+    # Edit the message: show dismissed badge, remove button
+    if chat_id in _chat_message_jobs:
         _chat_message_jobs[chat_id].pop(message_id, None)
+    if job:
         await client.edit_message_reply_markup(chat_id, message_id, None)
+        await client.send_message(chat_id, f"✅ Dismissed: {_esc(job.title)} @ {job.company_name}")
 
 
 async def handle_apply_command(db: Session, client: TelegramClient, user: User, chat_id: int, arg: str) -> None:
