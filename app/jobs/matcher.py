@@ -187,30 +187,31 @@ def score_job(
     if not has_title_match:
         return -50.0, False
 
-    score += 30
+    score += 25
 
     snippet_lower = (job.description_snippet or "").lower()
     title_desc = f"{title_lower} {snippet_lower}"
 
-    matched_skills = sum(1 for s in target_skills if s.lower() in title_desc)
-    if matched_skills > 0:
-        score += min(matched_skills * 5, 25)
+    matched_skills = [s for s in target_skills if s.lower() in title_desc]
+    skill_count = len(matched_skills)
+    if skill_count > 0:
+        score += min(skill_count * 10, 50)
 
     score += _score_location(job)
 
     salary_inr = job.salary_currency is None or job.salary_currency.upper() in ("", "INR", "IN")
     if salary_inr:
         if job.salary_min and job.salary_min >= settings.profile_min_salary:
-            score += 15
-        elif job.salary_max and job.salary_max >= settings.profile_min_salary:
             score += 10
+        elif job.salary_max and job.salary_max >= settings.profile_min_salary:
+            score += 5
 
     company_qualified = is_company_qualified(job.company_name)
     if company_qualified is True:
-        score += 15
+        score += 10
         requires_referral = True
     elif company_qualified is None:
-        score += 5
+        score += 3
 
     if job.source in ("greenhouse", "lever"):
         score += 5

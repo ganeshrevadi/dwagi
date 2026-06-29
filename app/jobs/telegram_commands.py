@@ -14,6 +14,8 @@ from app.jobs.resume_profile import (
     get_effective_titles,
     get_or_create_resume_profile,
 )
+
+DEFAULT_SKILLS = ["python", "typescript", "javascript", "react", "node.js", "sql", "aws", "docker", "git"]
 from app.jobs.scanner import run_scan
 from app.telegram.client import TelegramClient
 
@@ -88,11 +90,13 @@ async def handle_jobs_command(db: Session, client: TelegramClient, user: User, c
         await client.send_message(chat_id, "No jobs matching your profile today. Run /scan to check again.")
         return
 
-    await _send_job_batches(client, db, chat_id, matched, total)
+    skills = get_effective_skills(db, user.telegram_user_id) or DEFAULT_SKILLS
+    await _send_job_batches(client, db, chat_id, matched, total, skills)
 
 
 async def _send_job_batches(
     client: TelegramClient, db: Session, chat_id: int, jobs: list[Job], total: int,
+    skills: list[str] | None = None,
 ) -> None:
     await client.send_message(
         chat_id,
@@ -104,7 +108,14 @@ async def _send_job_batches(
         header = f"#{j.id} <a href=\"{j.url}\">{_esc(j.title)} @ {j.company_name}</a>"
         score_line = f"Score: {j.match_score:.0f}" if j.match_score else ""
         loc_line = f" — {j.location}" if j.location else ""
-        text = f"{header}{loc_line}  [{score_line}]"
+
+        matched_skills = []
+        if skills:
+            desc = ((j.title or "") + " " + (j.description_snippet or "")).lower()
+            matched_skills = [s for s in skills if s.lower() in desc]
+        skills_line = f" | Skills: {', '.join(matched_skills)}" if matched_skills else ""
+
+        text = f"{header}{loc_line}  [{score_line}]{skills_line}"
 
         reply_markup = {"inline_keyboard": [[{"text": "Dismiss", "callback_data": f"dismiss:{j.id}"}]]}
         result = await client.send_message(
